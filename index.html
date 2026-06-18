@@ -1736,6 +1736,24 @@
             try { return JSON.parse(file.content); } catch (e) { return null; }
         }
 
+        // 搜索已有 Gist（查找包含 daily-notes.json 的）
+        async function gistFind(token) {
+            let page = 1;
+            while (page <= 5) { // 最多搜 5 页（500 个 Gist）
+                const res = await fetch(`https://api.github.com/gists?per_page=100&page=${page}`, {
+                    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' }
+                });
+                if (!res.ok) { break; }
+                const gists = await res.json();
+                if (!Array.isArray(gists) || gists.length === 0) { break; }
+                for (const g of gists) {
+                    if (g.files && g.files[GIST_FILENAME]) { return g.id; }
+                }
+                page++;
+            }
+            return null;
+        }
+
         async function gistCreate(payload, token) {
             const res = await fetch('https://api.github.com/gists', {
                 method: 'POST',
@@ -1777,7 +1795,17 @@
                 }
                 const payload = currentPayload();
                 if (!gistId) {
-                    gistId = await gistCreate(payload, cfg.token);
+                    // 先搜索已有 Gist（另一台设备可能已创建）
+                    gistId = await gistFind(cfg.token);
+                    if (gistId) {
+                        // 找到已有 Gist，先拉取合并
+                        const remote = await gistGet(gistId, cfg.token);
+                        if (remote) { mergeRemote(remote); }
+                        const mergedPayload = currentPayload();
+                        await gistPatch(gistId, mergedPayload, cfg.token);
+                    } else {
+                        gistId = await gistCreate(payload, cfg.token);
+                    }
                     localStorage.setItem(GIST_ID_KEY, gistId);
                     const gistInput = document.getElementById('gistInput');
                     if (gistInput) { gistInput.value = gistId; }
